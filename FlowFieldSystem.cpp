@@ -175,7 +175,19 @@ FVector AFlowFieldSystem::GetFlowDirection(const FVector& WorldLocation) const
     if (!IsValidGridLocation(GridLocation))
         return FVector::ZeroVector;
 
-    return FVector(FlowFieldGrid[GridToIndex(GridLocation)].FlowDirection, 0.0f);
+    // Get the flow direction from the grid
+    FVector2D FlowDirection2D = FlowFieldGrid[GridToIndex(GridLocation)].FlowDirection;
+    
+    // If we have no flow direction, calculate direct path to target
+    if (FlowDirection2D.IsNearlyZero())
+    {
+        // Get direct vector to target (this is a fallback if flow field hasn't been calculated)
+        FVector DirectPath = (WorldLocation - GetActorLocation()).GetSafeNormal();
+        return DirectPath;
+    }
+
+    // Convert 2D direction to 3D and ensure it's normalized
+    return FVector(FlowDirection2D.X, FlowDirection2D.Y, 0.0f).GetSafeNormal();
 }
 
 void AFlowFieldSystem::DrawDebugFlowField() const

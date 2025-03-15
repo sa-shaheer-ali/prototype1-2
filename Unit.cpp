@@ -1,182 +1,172 @@
-// #include "Unit.h"
-// #include "DrawDebugHelpers.h"
-// #include "Kismet/GameplayStatics.h"
+#include "Unit.h"
+#include "Kismet/GameplayStatics.h"
 
-// AUnit::AUnit()
-// {
-//     PrimaryActorTick.bCanEverTick = true;
+AUnit::AUnit()
+{
+    PrimaryActorTick.bCanEverTick = true;
 
-//     // Initialize unit properties
-//     Health = 100.0f;
-//     MaxHealth = 100.0f;
-//     AttackDamage = 10.0f;
-//     AttackRange = 200.0f;
-//     AttackCooldown = 1.0f;
-//     TimeSinceLastAttack = 0.0f;
-//     CurrentTarget = nullptr;
-//     bIsSelected = false;
-//     bIsMoving = false;
-//     FormationOffset = FVector::ZeroVector;
-// }
+    // Create and setup the unit mesh
+    UnitMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("UnitMesh"));
+    RootComponent = UnitMesh;
+    
+    // Setup collision for better unit movement
+    UnitMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    UnitMesh->SetCollisionObjectType(ECollisionChannel::ECC_Pawn);
+    UnitMesh->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
+    UnitMesh->SetCollisionResponseToChannel(ECollisionChannel::ECC_Camera, ECollisionResponse::ECR_Ignore);
+    UnitMesh->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
+    
+    // Create movement component
+    MovementComponent = CreateDefaultSubobject<UFloatingPawnMovement>(TEXT("MovementComponent"));
+    MovementComponent->UpdatedComponent = RootComponent;
+    
+    // Set movement parameters
+    MovementSpeed = 300.0f;
+    RotationSpeed = 10.0f;
+    AcceptanceRadius = 50.0f;
+    AvoidanceRadius = 200.0f;  // Increased for earlier avoidance
+    
+    MovementComponent->MaxSpeed = MovementSpeed;
+    MovementComponent->Acceleration = MovementSpeed * 4;  // Increased for more responsive movement
+    MovementComponent->Deceleration = MovementSpeed * 4;
+    MovementComponent->bConstrainToPlane = true;
+    MovementComponent->SetPlaneConstraintNormal(FVector(0, 0, 1));
 
-// void AUnit::BeginPlay()
-// {
-//     Super::BeginPlay();
-// }
+    // Initialize variables
+    bIsMoving = false;
+    TargetDestination = FVector::ZeroVector;
+    StuckTime = 0.0f;
+    LastLocation = FVector::ZeroVector;
+}
 
-// void AUnit::Tick(float DeltaTime)
-// {
-//     Super::Tick(DeltaTime);
+void AUnit::BeginPlay()
+{
+    Super::BeginPlay();
+    LastLocation = GetActorLocation();
+}
 
-//     // Update combat
-//     UpdateCombat(DeltaTime);
+void AUnit::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
 
-//     // Auto-detect enemies if we don't have a target
-//     if (!CurrentTarget)
-//     {
-//         // Find closest enemy within range
-//         TArray<AActor*> FoundActors;
-//         UGameplayStatics::GetAllActorsOfClass(GetWorld(), AUnit::StaticClass(), FoundActors);
+    if (bIsMoving)
+    {
+        UpdateMovement(DeltaTime);
+    }
+}
 
-//         float ClosestDistance = AttackRange;
-//         AUnit* ClosestEnemy = nullptr;
+void AUnit::SetDestination(const FVector& NewDestination)
+{
+    TargetDestination = NewDestination;
+    bIsMoving = true;
+    StuckTime = 0.0f;
+}
 
-//         for (AActor* Actor : FoundActors)
-//         {
-//             if (AUnit* PotentialTarget = Cast<AUnit>(Actor))
-//             {
-//                 // Don't target self or dead units
-//                 if (PotentialTarget != this && PotentialTarget->Health > 0)
-//                 {
-//                     float Distance = FVector::Distance(GetActorLocation(), PotentialTarget->GetActorLocation());
-//                     if (Distance < ClosestDistance)
-//                     {
-//                         ClosestDistance = Distance;
-//                         ClosestEnemy = PotentialTarget;
-//                     }
-//                 }
-//             }
-//         }
+void AUnit::UpdateMovement(float DeltaTime)
+{
+    if (HasReachedDestination())
+    {
+        bIsMoving = false;
+        return;
+    }
 
-//         // If we found an enemy in range, attack it
-//         if (ClosestEnemy)
-//         {
-//             Attack(ClosestEnemy);
-//         }
-//     }
+    FVector CurrentLocation = GetActorLocation();
+    
+    // Check if unit is stuck
+    float MovedDistance = FVector::Distance(CurrentLocation, LastLocation);
+    if (MovedDistance < 1.0f && bIsMoving)
+    {
+        StuckTime += DeltaTime;
+    }
+    else
+    {
+        StuckTime = 0.0f;
+    }
+    LastLocation = CurrentLocation;
 
-//     // Update formation position if moving
-//     if (bIsMoving)
-//     {
-//         UpdateFormationPosition();
-//     }
-
-//     // Draw selection circle if selected
-//     if (bIsSelected)
-//     {
-//         DrawDebugCircle(
-//             GetWorld(),
-//             GetActorLocation(),
-//             100.0f,
-//             32,
-//             FColor::Green,
-//             false,
-//             -1.0f,
-//             0,
-//             2.0f
-//         );
-//     }
-// }
-
-// void AUnit::SetSelected(bool bSelected)
-// {
-//     bIsSelected = bSelected;
-// }
-
-// void AUnit::Attack(AUnit* Target)
-// {
-//     if (CanAttackTarget(Target))
-//     {
-//         CurrentTarget = Target;
-//         TimeSinceLastAttack = 0.0f;
-//     }
-// }
-
-// void AUnit::AttackMove(const FVector& Location)
-// {
-//     TargetLocation = Location;
-//     bIsMoving = true;
-//     CurrentTarget = nullptr;
-// }
-
-// void AUnit::UpdateFormationPosition()
-// {
-//     if (UCharacterMovementComponent* MovementComp = GetCharacterMovement())
-//     {
-//         FVector FormationLocation = TargetLocation + FormationOffset;
-//         FVector Direction = (FormationLocation - GetActorLocation()).GetSafeNormal();
+    // Calculate base direction to target
+    FVector DirectionToTarget = (TargetDestination - CurrentLocation).GetSafeNormal();
+    
+    // Get all nearby units for avoidance
+    TArray<AActor*> NearbyUnits;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AUnit::StaticClass(), NearbyUnits);
+    
+    FVector AvoidanceVector = FVector::ZeroVector;
+    int32 AvoidCount = 0;
+    
+    // Calculate avoidance vector with improved close-range response
+    for (AActor* OtherActor : NearbyUnits)
+    {
+        if (OtherActor != this)
+        {
+            FVector OtherLocation = OtherActor->GetActorLocation();
+            float Distance = FVector::Distance(CurrentLocation, OtherLocation);
+            
+            if (Distance < AvoidanceRadius)
+            {
+                FVector AwayFromOther = (CurrentLocation - OtherLocation);
+                float AvoidanceStrength = 1.0f - (Distance / AvoidanceRadius);
+                
+                // Exponential avoidance strength for closer units
+                AvoidanceStrength = FMath::Pow(AvoidanceStrength, 1.5f);
+                
+                // Extra strength when very close
+                if (Distance < AvoidanceRadius * 0.3f)
+                {
+                    AvoidanceStrength *= 2.0f;
+                }
+                
+                AvoidanceVector += AwayFromOther.GetSafeNormal() * AvoidanceStrength;
+                AvoidCount++;
+            }
+        }
+    }
+    
+    // Calculate final movement direction with improved blending
+    FVector FinalDirection = DirectionToTarget;
+    if (AvoidCount > 0)
+    {
+        AvoidanceVector = AvoidanceVector / AvoidCount;
         
-//         // Move towards formation position
-//         AddMovementInput(Direction, 1.0f);
+        // Stronger avoidance influence when stuck
+        float AvoidanceInfluence = FMath::Clamp(0.4f + (StuckTime * 0.2f), 0.4f, 0.8f);
+        float TargetInfluence = 1.0f - AvoidanceInfluence;
         
-//         // Make unit face movement direction
-//         if (!Direction.IsZero())
-//         {
-//             FRotator TargetRotation = Direction.Rotation();
-//             SetActorRotation(TargetRotation);
-//         }
+        // Add slight randomization when stuck to break symmetry
+        if (StuckTime > 1.0f)
+        {
+            FVector RandomOffset = FVector(
+                FMath::RandRange(-0.2f, 0.2f),
+                FMath::RandRange(-0.2f, 0.2f),
+                0.0f
+            );
+            AvoidanceVector += RandomOffset;
+        }
+        
+        FinalDirection = (DirectionToTarget * TargetInfluence + AvoidanceVector * AvoidanceInfluence).GetSafeNormal();
+        
+        // Add diagonal movement options when stuck
+        if (StuckTime > 0.5f)
+        {
+            FVector RightVector = FVector::CrossProduct(FVector::UpVector, DirectionToTarget);
+            FinalDirection += RightVector * FMath::Sin(StuckTime * 2.0f) * 0.3f;
+            FinalDirection = FinalDirection.GetSafeNormal();
+        }
+    }
+    
+    // Apply movement with increased force when stuck
+    float MovementForce = 1.0f + (StuckTime * 0.5f);
+    MovementForce = FMath::Clamp(MovementForce, 1.0f, 2.0f);
+    AddMovementInput(FinalDirection, MovementForce);
+    
+    // Rotate towards movement direction
+    FRotator TargetRotation = FinalDirection.Rotation();
+    FRotator CurrentRotation = GetActorRotation();
+    FRotator NewRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, RotationSpeed);
+    SetActorRotation(NewRotation);
+}
 
-//         // Check if we've reached the formation position
-//         float DistanceToTarget = FVector::Distance(GetActorLocation(), FormationLocation);
-//         if (DistanceToTarget < 100.0f)
-//         {
-//             bIsMoving = false;
-//             MovementComp->Velocity = FVector::ZeroVector;
-//         }
-//     }
-// }
-
-// bool AUnit::CanAttackTarget(AUnit* Target) const
-// {
-//     if (!Target || Target->Health <= 0.0f)
-//         return false;
-
-//     float DistanceToTarget = FVector::Distance(GetActorLocation(), Target->GetActorLocation());
-//     return DistanceToTarget <= AttackRange;
-// }
-
-// void AUnit::UpdateCombat(float DeltaTime)
-// {
-//     if (CurrentTarget && CanAttackTarget(CurrentTarget))
-//     {
-//         TimeSinceLastAttack += DeltaTime;
-//         if (TimeSinceLastAttack >= AttackCooldown)
-//         {
-//             // Deal damage to target
-//             CurrentTarget->Health = FMath::Max(0.0f, CurrentTarget->Health - AttackDamage);
-//             TimeSinceLastAttack = 0.0f;
-
-//             // Draw debug line to show attack
-//             DrawDebugLine(
-//                 GetWorld(),
-//                 GetActorLocation(),
-//                 CurrentTarget->GetActorLocation(),
-//                 FColor::Red,
-//                 false,
-//                 0.1f,
-//                 0,
-//                 1.0f
-//             );
-
-//             // Clear target if dead
-//             if (CurrentTarget->Health <= 0.0f)
-//             {
-//                 CurrentTarget = nullptr;
-//             }
-//         }
-//     }
-//     else
-//     {
-//         CurrentTarget = nullptr;
-//     }
-// } 
+bool AUnit::HasReachedDestination() const
+{
+    return FVector::Distance(GetActorLocation(), TargetDestination) <= AcceptanceRadius;
+}
